@@ -1,0 +1,127 @@
+#define BLYNK_TEMPLATE_ID "TMPL68tXma113"
+#define BLYNK_TEMPLATE_NAME "Kinh Bao Ho"
+#define BLYNK_AUTH_TOKEN "QvkKTKf3mD3bcqYjvvvfSyBRzq3lU47h"
+
+#define BLYNK_PRINT Serial
+
+#include <ESP8266WiFi.h>
+#include <BlynkSimpleEsp8266.h>
+
+char ssid[] = "Wifi_2.4G";
+char pass[] = "66668888";
+
+#define sensorPin D1  // Cảm biến mắt chớp
+#define motorPin D2   // Điều khiển động cơ
+#define buzzerPin D3  // Còi báo động
+
+unsigned long eyesClosedTime = 0;
+bool isBuzzerOn = false;
+bool isMotorOn = true;
+bool buzzerEnabled = true; // Biến bật/tắt còi
+bool motorEnabled = true;  // Biến bật/tắt động cơ
+unsigned long lastSensorRead = 0;
+int lastSensorState = HIGH; // Mặc định mắt mở
+int eyeClosedThreshold = 4000; // Giá trị mặc định 4 giây
+
+void reconnectBlynk() {
+  if (!Blynk.connected()) {
+    Serial.println("Mất kết nối Blynk! Đang thử kết nối lại...");
+    if (Blynk.connect()) {
+      Serial.println("Kết nối lại Blynk thành công!");
+    } else {
+      Serial.println("Kết nối Blynk thất bại.");
+    }
+  }
+}
+
+// Nhận giá trị từ V3 để điều chỉnh thời gian mắt nhắm
+BLYNK_WRITE(V3) {
+  eyeClosedThreshold = param.asInt() * 1000;
+  Serial.print("Ngưỡng thời gian mới: ");
+  Serial.println(eyeClosedThreshold);
+}
+
+
+// Nhận giá trị bật/tắt động cơ
+BLYNK_WRITE(V4) {
+  motorEnabled = param.asInt();
+  Serial.print("Trạng thái động cơ nhận từ Blynk: ");
+  Serial.println(motorEnabled);
+
+  if (!motorEnabled) {
+    digitalWrite(motorPin, LOW);
+    isMotorOn = false;
+    Blynk.virtualWrite(V2, 0);
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  WiFi.begin(ssid, pass);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nWiFi đã kết nối.");
+
+  Blynk.config(BLYNK_AUTH_TOKEN);
+  pinMode(motorPin, OUTPUT);
+  pinMode(buzzerPin, OUTPUT);
+  pinMode(sensorPin, INPUT_PULLUP);
+  digitalWrite(motorPin, HIGH); // Ban đầu bật động cơ
+}
+
+void loop() {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("Mất kết nối WiFi! Đang thử kết nối lại...");
+    WiFi.begin(ssid, pass);
+  }
+  reconnectBlynk();
+  Blynk.run();
+
+  unsigned long currentMillis = millis();
+  if (currentMillis - lastSensorRead >= 100) { // Đọc cảm biến mỗi 100ms
+    lastSensorRead = currentMillis;
+    int sensorValue = digitalRead(sensorPin);
+    if (sensorValue != lastSensorState) {
+      lastSensorState = sensorValue;
+      Serial.print("Giá trị cảm biến: ");
+      Serial.println(sensorValue);
+      Blynk.virtualWrite(V0, sensorValue);
+    }
+
+
+
+    if (sensorValue == LOW) { // Nếu mắt nhắm
+      if (eyesClosedTime == 0) {
+        eyesClosedTime = millis();
+      }
+      if (millis() - eyesClosedTime >= eyeClosedThreshold && !isBuzzerOn && buzzerEnabled) {
+        digitalWrite(buzzerPin, HIGH);
+        isBuzzerOn = true;
+        Blynk.virtualWrite(V1, 1);
+      }
+      if (millis() - eyesClosedTime >= eyeClosedThreshold + 2000 && isMotorOn && motorEnabled) {
+        digitalWrite(motorPin, LOW);
+        isMotorOn = false;
+        Blynk.virtualWrite(V2, 0);
+      }
+
+
+        
+    } else { // Nếu mắt mở
+      eyesClosedTime = 0;
+      if (buzzerEnabled) {
+        digitalWrite(buzzerPin, LOW);
+        isBuzzerOn = false;
+        Blynk.virtualWrite(V1, 0);
+      }
+      if (motorEnabled) {
+        digitalWrite(motorPin, HIGH);
+        isMotorOn = true;
+        Blynk.virtualWrite(V2, 1);
+      }
+    }
+  }
+}
